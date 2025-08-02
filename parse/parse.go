@@ -5,7 +5,9 @@ import (
 	"encoding/base64"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -16,6 +18,10 @@ import (
 )
 
 func parseSection(s *goquery.Selection, imagePolicy ImagePolicy, lastPieceType PieceType) []Piece {
+	return parseSectionWithProxy(s, imagePolicy, lastPieceType, "")
+}
+
+func parseSectionWithProxy(s *goquery.Selection, imagePolicy ImagePolicy, lastPieceType PieceType, proxy string) []Piece {
 	var pieces []Piece
 	if lastPieceType == O_LIST || lastPieceType == U_LIST || lastPieceType == NULL || lastPieceType == BLOCK_QUOTES {
 		// pieces = append(pieces, Piece{NULL, nil, nil})
@@ -29,46 +35,95 @@ func parseSection(s *goquery.Selection, imagePolicy ImagePolicy, lastPieceType P
 			attr["href"], _ = sc.Attr("href")
 			pieces = append(pieces, Piece{LINK, removeBrAndBlank(sc.Text()), attr})
 		} else if sc.Is("img") {
-			attr["src"], _ = sc.Attr("data-src")
+			// 优化图片处理，支持微信公众号的图片格式
+			src, _ := sc.Attr("data-src")
+			if src == "" {
+				src, _ = sc.Attr("src")
+			}
+			attr["src"] = src
 			attr["alt"], _ = sc.Attr("alt")
 			attr["title"], _ = sc.Attr("title")
+			
+			// 处理微信公众号的图片水印和格式
+			if strings.Contains(src, "mmbiz.qpic.cn") {
+				// 移除微信图片的压缩参数，获取原图
+				if strings.Contains(src, "wx_fmt=") {
+					src = strings.Split(src, "&wx_fmt=")[0] + "&wx_fmt=jpeg"
+				}
+				attr["src"] = src
+			}
+			
 			switch imagePolicy {
 			case IMAGE_POLICY_URL:
 				pieces = append(pieces, Piece{IMAGE, nil, attr})
 			case IMAGE_POLICY_SAVE:
-				image := fetchImgFile(attr["src"])
+				image := fetchImgFileWithProxy(attr["src"], proxy)
 				pieces = append(pieces, Piece{IMAGE, image, attr})
 			case IMAGE_POLICY_BASE64:
 				fallthrough
 			default:
-				base64Image := img2base64(fetchImgFile(attr["src"]))
+				base64Image := img2base64(fetchImgFileWithProxy(attr["src"], proxy))
 				pieces = append(pieces, Piece{IMAGE_BASE64, base64Image, attr})
 			}
 		} else if sc.Is("ol") {
-			pieces = append(pieces, parseList(sc, O_LIST, imagePolicy)...)
+			pieces = append(pieces, parseListWithProxy(sc, O_LIST, imagePolicy, proxy)...)
 		} else if sc.Is("ul") {
-			pieces = append(pieces, parseList(sc, U_LIST, imagePolicy)...)
-		} else if sc.Is("pre") || sc.Is("section.code-snippet__fix") {
+			pieces = append(pieces, parseListWithProxy(sc, U_LIST, imagePolicy, proxy)...)
+		} else if sc.Is("pre") || sc.Is("section.code-snippet__fix") || sc.Is("code") {
 			// 代码块
 			pieces = append(pieces, parsePre(sc)...)
 		} else if sc.Is("span") || sc.Is("figure") {
-			pieces = append(pieces, parseSection(sc, imagePolicy, _lastPieceType)...)
+			pieces = append(pieces, parseSectionWithProxy(sc, imagePolicy, _lastPieceType, proxy)...)
 		} else if sc.Is("p") || sc.Is("section") || sc.Is("figcaption") {
-			pieces = append(pieces, parseSection(sc, imagePolicy, _lastPieceType)...)
+			pieces = append(pieces, parseSectionWithProxy(sc, imagePolicy, _lastPieceType, proxy)...)
 			if removeBrAndBlank(sc.Text()) != "" && len(pieces) > 0 && pieces[len(pieces)-1].Type != BR {
 				pieces = append(pieces, Piece{BR, nil, nil})
 			}
 		} else if sc.Is("h1") || sc.Is("h2") || sc.Is("h3") || sc.Is("h4") || sc.Is("h5") || sc.Is("h6") {
 			pieces = append(pieces, parseHeader(sc)...)
 		} else if sc.Is("blockquote") {
-			pieces = append(pieces, parseBlockQuote(sc, imagePolicy)...)
-		} else if sc.Is("strong") {
+			pieces = append(pieces, parseBlockQuoteWithProxy(sc, imagePolicy, proxy)...)
+		} else if sc.Is("strong") || sc.Is("b") {
 			pieces = append(pieces, parseStrong(sc)...)
+		} else if sc.Is("em") || sc.Is("i") {
+			// 处理斜体文本
+			pieces = append(pieces, Piece{ITALIC_TEXT, removeBrAndBlank(sc.Text()), nil})
 		} else if sc.Is("table") {
 			pieces = append(pieces, parseTable(sc)...)
+		} else if sc.Is("hr") {
+			// 处理分隔线
+			pieces = append(pieces, Piece{HR, nil, nil})
+		} else if sc.Is("br") {
+			// 处理换行
+			pieces = append(pieces, Piece{BR, nil, nil})
 		} else {
-			if sc.Text() != "" {
-				pieces = append(pieces, Piece{NORMAL_TEXT, sc.Text(), nil})
+			// 处理微信公众号特有的元素
+			if sc.Is("mpvoice") || sc.Is("mp-common-mpaudio") {
+				// 处理语音消息
+				voiceId, _ := sc.Attr("voice_encode_fileid")
+				pieces = append(pieces, Piece{NORMAL_TEXT, "[语音消息: " + voiceId + "]", nil})
+			} else if sc.Is("mpvideo") {
+				// 处理视频消息
+				videoId, _ := sc.Attr("vid")
+				pieces = append(pieces, Piece{NORMAL_TEXT, "[视频消息: " + videoId + "]", nil})
+			} else if sc.Is("qqmusic") || sc.Is("mp-common-qqmusic") {
+				// 处理音乐消息
+				musicName, _ := sc.Attr("data-name")
+				pieces = append(pieces, Piece{NORMAL_TEXT, "[音乐: " + musicName + "]", nil})
+			} else if sc.Is("mp-common-profile") {
+				// 处理名片
+				profileName, _ := sc.Attr("data-name")
+				pieces = append(pieces, Piece{NORMAL_TEXT, "[名片: " + profileName + "]", nil})
+			} else if sc.Is("mp-common-card") {
+				// 处理卡片
+				cardTitle, _ := sc.Attr("data-title")
+				pieces = append(pieces, Piece{NORMAL_TEXT, "[卡片: " + cardTitle + "]", nil})
+			} else if sc.Text() != "" {
+				// 处理普通文本，优化空白字符处理
+				text := removeBrAndBlank(sc.Text())
+				if text != "" {
+					pieces = append(pieces, Piece{NORMAL_TEXT, text, nil})
+				}
 			}
 		}
 		if len(pieces) > 0 {
@@ -100,8 +155,10 @@ func parseHeader(s *goquery.Selection) []Piece {
 }
 
 func parsePre(s *goquery.Selection) []Piece {
-	// TODO when include img...
+	// 优化代码块解析，支持更多代码格式
 	var codeRows []string
+	
+	// 处理 <pre><code> 结构
 	s.Find("code").Each(func(i int, sc *goquery.Selection) {
 		var codeLine string = ""
 		sc.Contents().Each(func(i int, sc *goquery.Selection) {
@@ -114,32 +171,95 @@ func parsePre(s *goquery.Selection) []Piece {
 		})
 		codeRows = append(codeRows, codeLine)
 	})
-	p := Piece{CODE_BLOCK, codeRows, nil}
+	
+	// 如果没有找到 code 标签，直接处理 pre 标签内容
+	if len(codeRows) == 0 {
+		var codeLine string = ""
+		s.Contents().Each(func(i int, sc *goquery.Selection) {
+			if goquery.NodeName(sc) == "br" {
+				codeRows = append(codeRows, codeLine)
+				codeLine = ""
+			} else {
+				codeLine += sc.Text()
+			}
+		})
+		codeRows = append(codeRows, codeLine)
+	}
+	
+	// 清理空行
+	var cleanedRows []string
+	for _, row := range codeRows {
+		if strings.TrimSpace(row) != "" {
+			cleanedRows = append(cleanedRows, row)
+		}
+	}
+	
+	p := Piece{CODE_BLOCK, cleanedRows, nil}
 	return []Piece{p}
 }
 
 func parseList(s *goquery.Selection, ptype PieceType, imagePolicy ImagePolicy) []Piece {
+	return parseListWithProxy(s, ptype, imagePolicy, "")
+}
+
+func parseListWithProxy(s *goquery.Selection, ptype PieceType, imagePolicy ImagePolicy, proxy string) []Piece {
 	var list []Piece
 	s.Find("li").Each(func(i int, sc *goquery.Selection) {
-		list = append(list, Piece{ptype, parseSection(sc, imagePolicy, ptype), nil})
+		list = append(list, Piece{ptype, parseSectionWithProxy(sc, imagePolicy, ptype, proxy), nil})
 	})
 	return list
 }
 
 func parseBlockQuote(s *goquery.Selection, imagePolicy ImagePolicy) []Piece {
+	return parseBlockQuoteWithProxy(s, imagePolicy, "")
+}
+
+func parseBlockQuoteWithProxy(s *goquery.Selection, imagePolicy ImagePolicy, proxy string) []Piece {
 	var bq []Piece
 	s.Contents().Each(func(i int, sc *goquery.Selection) {
-		bq = append(bq, Piece{BLOCK_QUOTES, parseSection(sc, imagePolicy, BLOCK_QUOTES), nil})
+		bq = append(bq, Piece{BLOCK_QUOTES, parseSectionWithProxy(sc, imagePolicy, BLOCK_QUOTES, proxy), nil})
 	})
 	bq = append(bq, Piece{BR, nil, nil})
 	return bq
 }
 
 func parseTable(s *goquery.Selection) []Piece {
-	// 先简单粗暴把原生的挪过去
+	// 优化表格解析，转换为 Markdown 格式
 	var table []Piece
-	html, _ := s.Html()
-	table = append(table, Piece{TABLE, "<table>" + html + "</table>", map[string]string{"type": "native"}})
+	
+	// 尝试解析表格结构
+	var rows []string
+	s.Find("tr").Each(func(i int, tr *goquery.Selection) {
+		var cells []string
+		tr.Find("td, th").Each(func(j int, cell *goquery.Selection) {
+			cellText := removeBrAndBlank(cell.Text())
+			cells = append(cells, cellText)
+		})
+		if len(cells) > 0 {
+			rows = append(rows, "| "+strings.Join(cells, " | ")+" |")
+		}
+	})
+	
+	if len(rows) > 0 {
+		// 添加表头分隔符
+		if len(rows) > 1 {
+			headerRow := rows[0]
+			cellCount := strings.Count(headerRow, "|") - 1
+			separator := "|"
+			for i := 0; i < cellCount; i++ {
+				separator += " --- |"
+			}
+			rows = append([]string{rows[0], separator}, rows[1:]...)
+		}
+		
+		tableMd := strings.Join(rows, "\n")
+		table = append(table, Piece{TABLE, tableMd, map[string]string{"type": "markdown"}})
+	} else {
+		// 如果无法解析，保留原始 HTML
+		html, _ := s.Html()
+		table = append(table, Piece{TABLE, "<table>" + html + "</table>", map[string]string{"type": "native"}})
+	}
+	
 	return table
 }
 
@@ -153,13 +273,17 @@ func parseMeta(s *goquery.Selection) []string {
 	var res []string
 	s.Children().Each(func(i int, sc *goquery.Selection) {
 		if sc.Is("#profileBt") {
-			res = append(res, removeBrAndBlank(sc.Find("#js_name").Text()))
+			authorName := removeBrAndBlank(sc.Find("#js_name").Text())
+			if authorName != "" {
+				res = append(res, authorName)
+			}
 		} else {
 			style, exists := sc.Attr("style")
 			if !(exists && strings.Contains(style, "display: none;")) {
-				// t := sc.Nodes[0].Data
-				t := strings.TrimSpace(sc.Text())
-				res = append(res, t)
+				t := removeBrAndBlank(sc.Text())
+				if t != "" {
+					res = append(res, t)
+				}
 			}
 		}
 	})
@@ -167,6 +291,10 @@ func parseMeta(s *goquery.Selection) []string {
 }
 
 func ParseFromReader(r io.Reader, imagePolicy ImagePolicy) Article {
+	return ParseFromReaderWithProxy(r, imagePolicy, "")
+}
+
+func ParseFromReaderWithProxy(r io.Reader, imagePolicy ImagePolicy, proxy string) Article {
 	var article Article
 	doc, err := goquery.NewDocumentFromReader(r)
 	if err != nil {
@@ -203,7 +331,7 @@ func ParseFromReader(r io.Reader, imagePolicy ImagePolicy) Article {
 	// p[style="line-height: 1.5em;"]				=> 项目列表（有序/无序）
 	// section[style=".*text-align:center"]>img		=> 居中段落（图片）
 	content := mainContent.Find("#js_content")
-	pieces := parseSection(content, imagePolicy, NULL)
+	pieces := parseSectionWithProxy(content, imagePolicy, NULL, proxy)
 	article.Content = pieces
 
 	return article
@@ -227,50 +355,134 @@ func ParseFromHTMLFile(filepath string, imagePolicy ImagePolicy) Article {
 }
 
 func ParseFromURL(url string, imagePolicy ImagePolicy) Article {
-	req, err := http.NewRequest("GET", url, nil)
+	return ParseFromURLWithProxy(url, imagePolicy, "")
+}
+
+func ParseFromURLWithProxy(targetURL string, imagePolicy ImagePolicy, proxy string) Article {
+	req, err := http.NewRequest("GET", targetURL, nil)
 
 	if err != nil {
-		log.Fatalf("new request %s error: %s", url, err.Error())
+		log.Printf("new request %s error: %s", targetURL, err.Error())
+		return Article{} // 返回空结果而不是 panic
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36 Edg/133.0.0.0")
-	client := &http.Client{}
+	
+	// 设置超时
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+	
+	// 如果提供了代理，设置代理
+	if proxy != "" {
+		proxyURL, err := url.Parse("http://" + proxy)
+		if err != nil {
+			log.Printf("invalid proxy format %s: %s", proxy, err.Error())
+		} else {
+			client.Transport = &http.Transport{
+				Proxy: http.ProxyURL(proxyURL),
+				// 设置连接超时
+				DialContext: (&net.Dialer{
+					Timeout:   30 * time.Second,
+					KeepAlive: 30 * time.Second,
+				}).DialContext,
+				// 设置空闲连接超时
+				IdleConnTimeout:       90 * time.Second,
+				TLSHandshakeTimeout:   30 * time.Second,
+				ResponseHeaderTimeout: 30 * time.Second,
+			}
+		}
+	}
+	
 	res, err := client.Do(req)
 	if err != nil {
-		log.Fatalf("request to url %s error: %s", url, err.Error())
+		log.Printf("request to url %s error: %s", targetURL, err.Error())
+		return Article{} // 返回空结果而不是 panic
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
-		log.Fatalf("get from url %s error: %d %s", url, res.StatusCode, res.Status)
+		log.Printf("get from url %s error: %d %s", targetURL, res.StatusCode, res.Status)
+		return Article{} // 返回空结果而不是 panic
 	}
-	return ParseFromReader(res.Body, imagePolicy)
+	return ParseFromReaderWithProxy(res.Body, imagePolicy, proxy)
 }
 
 func removeBrAndBlank(s string) string {
+	// 优化文本清理，更好地处理微信公众号的文本格式
+	s = strings.TrimSpace(s)
+	
+	// 移除多余的空白字符
 	regstr := "\\s{2,}"
 	reg, _ := regexp.Compile(regstr)
-	sb := make([]byte, len(s))
-	copy(sb, s)
-	spc_index := reg.FindStringIndex(string(sb)) //在字符串中搜索
-	for len(spc_index) > 0 {                     //找到适配项
-		sb = append(sb[:spc_index[0]+1], sb[spc_index[1]:]...) //删除多余空格
-		spc_index = reg.FindStringIndex(string(sb))            //继续在字符串中搜索
-	}
-	return strings.Replace(string(sb), "\n", " ", -1)
+	s = reg.ReplaceAllString(s, " ")
+	
+	// 处理换行符
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	
+	// 移除微信特有的空白字符
+	s = strings.ReplaceAll(s, "\u00A0", " ") // 不间断空格
+	s = strings.ReplaceAll(s, "\u200B", "")  // 零宽空格
+	s = strings.ReplaceAll(s, "\u200C", "")  // 零宽非连接符
+	s = strings.ReplaceAll(s, "\u200D", "")  // 零宽连接符
+	
+	// 再次清理多余空格
+	s = reg.ReplaceAllString(s, " ")
+	s = strings.TrimSpace(s)
+	
+	return s
 }
 
 func fetchImgFile(url string) []byte {
-	res, err := http.Get(url)
+	return fetchImgFileWithProxy(url, "")
+}
+
+func fetchImgFileWithProxy(imgURL string, proxy string) []byte {
+	req, err := http.NewRequest("GET", imgURL, nil)
 	if err != nil {
-		log.Fatalf("get Image from url %s error: %s", url, err.Error())
+		log.Printf("new request for image %s error: %s", imgURL, err.Error())
+		return nil
+	}
+	
+	// 设置超时
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+	
+	// 如果提供了代理，设置代理
+	if proxy != "" {
+		proxyURL, err := url.Parse("http://" + proxy)
+		if err != nil {
+			log.Printf("invalid proxy format %s: %s", proxy, err.Error())
+		} else {
+			client.Transport = &http.Transport{
+				Proxy: http.ProxyURL(proxyURL),
+				// 设置连接超时
+				DialContext: (&net.Dialer{
+					Timeout:   30 * time.Second,
+					KeepAlive: 30 * time.Second,
+				}).DialContext,
+				// 设置空闲连接超时
+				IdleConnTimeout:       90 * time.Second,
+				TLSHandshakeTimeout:   30 * time.Second,
+				ResponseHeaderTimeout: 30 * time.Second,
+			}
+		}
+	}
+	
+	res, err := client.Do(req)
+	if err != nil {
+		log.Printf("get Image from url %s error: %s", imgURL, err.Error())
 		return nil
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
-		log.Fatalf("get Image from url %s error: %d %s", url, res.StatusCode, res.Status)
+		log.Printf("get Image from url %s error: %d %s", imgURL, res.StatusCode, res.Status)
+		return nil
 	}
 	content, err := io.ReadAll(res.Body)
 	if err != nil {
-		log.Fatalf("read image Response error: %s", err.Error())
+		log.Printf("read image Response error: %s", err.Error())
+		return nil
 	}
 	return content
 }

@@ -219,10 +219,13 @@ func formatContent(pieces []parse.Piece, depth int) (string, map[string][]byte) 
 
 func formatTable(piece parse.Piece) string {
 	var tableMdStr string
-	if piece.Attrs != nil && piece.Attrs["type"] == "native" {
-		tableMdStr = piece.Val.(string)
+	if piece.Attrs != nil {
+		if piece.Attrs["type"] == "native" {
+			tableMdStr = piece.Val.(string)
+		} else if piece.Attrs["type"] == "markdown" {
+			tableMdStr = piece.Val.(string) + "  \n"
+		}
 	}
-	// TODO
 	return tableMdStr
 }
 
