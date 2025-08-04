@@ -66,35 +66,255 @@ func Start(addr string) {
 
 var defHTML string = `
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<title>wechatmp2markdown</title>
+	<title>微信公众号文章转Markdown工具</title>
+	<style>
+		* {
+			margin: 0;
+			padding: 0;
+			box-sizing: border-box;
+		}
+		
+		body {
+			font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+			background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+			min-height: 100vh;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			padding: 20px;
+		}
+		
+		.container {
+			background: rgba(255, 255, 255, 0.95);
+			border-radius: 20px;
+			box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+			padding: 40px;
+			max-width: 800px;
+			width: 100%;
+			backdrop-filter: blur(10px);
+		}
+		
+		.header {
+			text-align: center;
+			margin-bottom: 40px;
+		}
+		
+		.logo {
+			font-size: 2.5em;
+			font-weight: 700;
+			background: linear-gradient(45deg, #667eea, #764ba2);
+			-webkit-background-clip: text;
+			-webkit-text-fill-color: transparent;
+			background-clip: text;
+			margin-bottom: 10px;
+		}
+		
+		.subtitle {
+			color: #666;
+			font-size: 1.1em;
+			font-weight: 300;
+		}
+		
+		.usage-section {
+			margin-bottom: 30px;
+		}
+		
+		.section-title {
+			font-size: 1.3em;
+			font-weight: 600;
+			color: #333;
+			margin-bottom: 20px;
+			display: flex;
+			align-items: center;
+		}
+		
+		.section-title::before {
+			content: "📖";
+			margin-right: 10px;
+			font-size: 1.2em;
+		}
+		
+		.param-list {
+			list-style: none;
+			background: #f8f9fa;
+			border-radius: 12px;
+			padding: 20px;
+			margin-bottom: 20px;
+		}
+		
+		.param-item {
+			margin-bottom: 15px;
+			padding: 15px;
+			background: white;
+			border-radius: 8px;
+			border-left: 4px solid #667eea;
+			box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+		}
+		
+		.param-item:last-child {
+			margin-bottom: 0;
+		}
+		
+		.param-name {
+			font-weight: 600;
+			color: #667eea;
+			display: inline-block;
+			margin-bottom: 5px;
+		}
+		
+		.param-desc {
+			color: #555;
+			line-height: 1.5;
+		}
+		
+		.example-section {
+			background: #e3f2fd;
+			border-radius: 12px;
+			padding: 20px;
+			margin-top: 20px;
+		}
+		
+		.example-title {
+			font-size: 1.2em;
+			font-weight: 600;
+			color: #1976d2;
+			margin-bottom: 15px;
+			display: flex;
+			align-items: center;
+		}
+		
+		.example-title::before {
+			content: "💡";
+			margin-right: 10px;
+		}
+		
+		.example-url {
+			background: #fff;
+			padding: 15px;
+			border-radius: 8px;
+			font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+			font-size: 0.9em;
+			color: #333;
+			word-break: break-all;
+			border: 1px solid #e0e0e0;
+			box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+		}
+		
+		.features {
+			display: grid;
+			grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+			gap: 20px;
+			margin-top: 30px;
+		}
+		
+		.feature-item {
+			text-align: center;
+			padding: 20px;
+			background: white;
+			border-radius: 12px;
+			box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
+			transition: transform 0.2s ease;
+		}
+		
+		.feature-item:hover {
+			transform: translateY(-2px);
+		}
+		
+		.feature-icon {
+			font-size: 2em;
+			margin-bottom: 10px;
+		}
+		
+		.feature-title {
+			font-weight: 600;
+			color: #333;
+			margin-bottom: 5px;
+		}
+		
+		.feature-desc {
+			color: #666;
+			font-size: 0.9em;
+		}
+		
+		@media (max-width: 768px) {
+			.container {
+				padding: 20px;
+			}
+			
+			.logo {
+				font-size: 2em;
+			}
+			
+			.features {
+				grid-template-columns: 1fr;
+			}
+		}
+	</style>
 </head>
 <body>
-	<h1 style="text-align: center; width: 100%;">wechatmp2markdown</h1>
-	<ul style="margin: 0 auto; width: 89%;">
-		<li>
-			<strong>param 'url' is required.</strong> please put in a wechatmp URL and try again.
-		</li>
-		<li>
-			<strong>param 'image' is optional</strong>, value include: 'url' / 'save' / 'base64'(default)
-		</li>
-		<li>
-			<strong>param 'proxy' is optional</strong>, format: 'ip:port', example: '127.0.0.1:8080'
-		</li>
-		<li>
-			<strong>example:</strong> http://localhost:8964/?url=https://mp.weixin.qq.com/s?__biz=aaaa==&mid=1111&idx=2&sn=bbbb&chksm=cccc&scene=123&image=save&proxy=127.0.0.1:8080
-		</li>
-	</ul>
+	<div class="container">
+		<div class="header">
+			<div class="logo">wechatmp2markdown</div>
+			<div class="subtitle">微信公众号文章转Markdown工具</div>
+		</div>
+		
+		<div class="usage-section">
+			<div class="section-title">使用说明</div>
+			<div class="param-list">
+				<div class="param-item">
+					<div class="param-name">url 参数（必需）</div>
+					<div class="param-desc">请输入微信公众号文章的URL地址</div>
+				</div>
+				<div class="param-item">
+					<div class="param-name">image 参数（可选）</div>
+					<div class="param-desc">图片保存方式：'url'（引用原地址） / 'save'（保存到本地） / 'base64'（编码到文件内，默认）</div>
+				</div>
+				<div class="param-item">
+					<div class="param-name">proxy 参数（可选）</div>
+					<div class="param-desc">代理服务器地址，格式：'ip:port'，例如：'127.0.0.1:8080'</div>
+				</div>
+			</div>
+			
+			<div class="example-section">
+				<div class="example-title">使用示例</div>
+				<div class="example-url">http://localhost:8964/?url=https://mp.weixin.qq.com/s?__biz=aaaa==&mid=1111&idx=2&sn=bbbb&chksm=cccc&scene=123&image=save&proxy=127.0.0.1:8080</div>
+			</div>
+		</div>
+		
+		<div class="features">
+			<div class="feature-item">
+				<div class="feature-icon">📝</div>
+				<div class="feature-title">Markdown转换</div>
+				<div class="feature-desc">将微信公众号文章转换为标准Markdown格式</div>
+			</div>
+			<div class="feature-item">
+				<div class="feature-icon">🖼️</div>
+				<div class="feature-title">图片处理</div>
+				<div class="feature-desc">支持多种图片保存方式，包括本地保存和Base64编码</div>
+			</div>
+			<div class="feature-item">
+				<div class="feature-icon">🌐</div>
+				<div class="feature-title">代理支持</div>
+				<div class="feature-desc">支持代理服务器，提高访问成功率</div>
+			</div>
+			<div class="feature-item">
+				<div class="feature-icon">⚡</div>
+				<div class="feature-title">快速转换</div>
+				<div class="feature-desc">高效解析，快速生成Markdown文件</div>
+			</div>
+		</div>
+	</div>
 </body>
 </html>
 `
 
 func parseParams(rawQuery string) map[string]string {
 	result := make(map[string]string)
-	
+
 	// 解析 image 参数
 	reg := regexp.MustCompile(`(&?image=)([a-z]+)`)
 	matcheImage := reg.FindStringSubmatch(rawQuery)
@@ -109,7 +329,7 @@ func parseParams(rawQuery string) map[string]string {
 			result["image"] = imageParamVal
 		}
 	}
-	
+
 	// 解析 proxy 参数
 	regProxy := regexp.MustCompile(`(&?proxy=)([^&]+)`)
 	matcheProxy := regProxy.FindStringSubmatch(remainingQuery)
@@ -123,7 +343,7 @@ func parseParams(rawQuery string) map[string]string {
 			result["proxy"] = proxyParamVal
 		}
 	}
-	
+
 	// 解析 url 参数
 	regUrl := regexp.MustCompile(`(&?url=)(.+)`)
 	matcheUrl := regUrl.FindStringSubmatch(remainingQuery)

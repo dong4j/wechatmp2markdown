@@ -96,17 +96,20 @@ markdown和图片文件将保存在 `D:\wechatmp_bak\gitcode操你妈\` 下
 - `port` 监听的端口
 
 当看到 `wechatmp2markdown server listening on :[port]` 时，
-打开浏览器（或curl工具）访问：`localhost:[port]?url=[url]&image=[image]`
+打开浏览器（或curl工具）访问：`localhost:[port]?url=[url]&image=[image]&proxy=[proxy]`
 - `url`   微信公众号文章网页的url
 - `image` 可选参数，文章内图片的保存方式，参数值与上文CLI模式的相同
+- `proxy` 可选参数，代理服务器地址，格式为 `ip:port`，例如：`127.0.0.1:8080`
 
 返回的数据即为该文章的markdown文件（若image=save，则返回的是zip格式的压缩包）
 
-例如：windows环境，服务启动并监听8964端口，想把url为`https://mp.weixin.qq.com/s/a=1&b=2`的文章转成markdown并下载，文章内的**图片**保存到**本地**
+> 💡 **提示**：直接访问 `localhost:[port]` 可以看到美观的使用说明页面，包含详细的功能介绍和使用示例。
+
+例如：windows环境，服务启动并监听8964端口，想把url为`https://mp.weixin.qq.com/s/a=1&b=2`的文章转成markdown并下载，文章内的**图片**保存到**本地**，并使用代理服务器
 
 则cmd执行： `wechatmp2makrdown_win64.exe server 8964`
 
-浏览器访问：`localhost:8964?url=https://mp.weixin.qq.com/s/a=1&b=2&image=save`，
+浏览器访问：`localhost:8964?url=https://mp.weixin.qq.com/s/a=1&b=2&image=save&proxy=127.0.0.1:8080`，
 将返回一个zip文件
 
 > 在linux环境下，使用web server模式，需要为程序赋予可执行权限，例如：` chmod +x wechatmp2markdown-v1.1.11_linux_amd64`
@@ -144,8 +147,34 @@ mingw32-make win-build-win32
 
 编译好的文件在`./build`目录下
 
+## 更新日志
+
+### v1.2.0 (2025-08-02)
+- ✨ **新增代理解析功能**
+  - 新增 `proxy` 参数支持，可在 web server 模式下使用代理服务器
+  - 优化图片处理，支持微信公众号的图片格式和水印处理
+  - 增强表格解析，支持转换为 Markdown 格式
+  - 改进代码块解析，支持更多代码格式
+  - 优化文本清理，更好地处理微信公众号的文本格式
+  - 增加对微信公众号特有元素的支持（语音、视频、音乐、名片、卡片等）
+  - 添加错误处理和超时设置，提高稳定性
+- 🎨 **界面美化升级**
+  - 重新设计 Web 服务器默认页面，采用现代化 UI 设计
+  - 添加响应式布局，支持移动端访问
+  - 使用渐变背景和毛玻璃效果，提升视觉体验
+  - 增加功能特性展示卡片，更直观地介绍工具功能
+  - 优化参数说明的可读性和用户体验
+
+### v1.1.11 (2025-07-XX)
+- 🐛 修复请求头问题，添加 User-Agent 解决被官方反爬的问题
+
+### v1.1.10 (2025-07-XX)
+- 🐛 修复 Linux 下标题包含斜杠导致被分成两级目录的 bug（使用 ∕ 替代）
+
 ## TODO
 - [x] 支持解析表格元素(table tag)
+- [x] 支持代理解析功能
+- [x] 美化 Web 服务器界面
 
 ## 最后
 抓紧时间窗口。努力记录。黑暗中记得光的模样。
